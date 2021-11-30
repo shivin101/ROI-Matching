@@ -1,0 +1,220 @@
+clc;
+clear all;
+close all;
+
+timer = tic;
+
+%Session ID for use in evaluation
+ids=[1,2,3,4];
+denoise = 0;
+root = 'C:\Users\shivi\OneDrive\Documents\Courses\CSE293\New_data\';
+dir_list = dir(root);
+dir_list = dir_list(3:end);
+
+%Directory from which to choose sessions
+dir_idx =12;
+val = dir_list(dir_idx);
+mod_dir = [val.folder,'\',val.name];
+
+
+num_sessions = dir([mod_dir,'\','*.mat']);
+res_dir ='.\results\ryoma\'
+mkdir(res_dir);
+file_list = {};
+%Hard coding some naming conventions in this stage of the process
+lenId = size(ids,2);
+for i = 1:size(ids,2)
+    %Load files
+    file_list(i) = {[mod_dir,'\','modified_stack',num2str(ids(i)),'.mat']};
+    file(i) = file_list(i);
+    load(file_list{i});
+    
+    %Create an array of ROI from preprocessed arrays
+    Roi(i) = {ROI};
+%     idxDict(i) = {idxList};
+
+    
+    %Create an array of Image array
+    
+    % imagesc(max(max_stack,[],3));
+%     max_stack(avg_stack>8e3)=0;
+%     img(i) = {max_stack};
+    
+    max_stack(max_stack>8e3)=0;
+    max_stack = max(max_stack,[],3);
+    img(i) = {max_stack};
+    
+    if denoise
+        for j =1:size(img{i},3)
+            curr_img = max_stack;
+            den_img = preprocess_data(double(curr_img(:,:,j)));
+            curr_img(:,:,j)=den_img;
+        end
+        img(i)={curr_img};
+    end
+    % hold on;
+end
+
+%Compare 2 at a time for now
+for i =1:lenId
+    
+    img_curr = img{i};
+    ROI_curr = Roi{i};
+    features1 = [];
+    points1 = [];
+    for j=1:size(img_curr,3)
+        %Extract sift features and keypoints
+        [features,points,mid_points] = getFeaturesROI(img_curr(:,:,j),...
+            ROI_curr,'SIFT');
+        features1 = cat(1,features1,features);
+        points1 = cat(1,points1,points);
+
+    end
+    %Store the feautures and points array
+    feature_arr(i)={features1'};
+    midp_arr(i)={mid_points(:,1:2)};
+    points_arr(i)={points1(:,1:2)'};
+    views(i)=struct('desc',feature_arr{i},'img',uint8(max(img{i},[],3)/3),...
+        'frame',points_arr{i},'nfeature',size(feature_arr{i},2));
+end
+for i=1:lenId
+    for j=i+1:lenId
+            img1 = img{i};
+            img2 = img{j};
+            ROI1 = Roi{i};
+            ROI2 = Roi{j};
+            %Find correpondence between images
+            %using features
+            [matches1,matches2]=get_corresp(img1,ROI1,img2,ROI2);
+            I1 = max(img1,[],3);
+            I2 = max(img2,[],3);
+
+            idx = (lenId-1)*(i-1)+j-1;
+            
+            %Estimate global affine transform for a pair using matches
+            tform  = estimateGeometricTransform(matches1,matches2,...
+                'affine','MaxDistance',1.0,'Confidence',90,'MaxNumTrials',2000);
+            tformArr(i,j)=tform
+%             outputView = imref2d(size(I1));
+%             fig0 = figure;
+%             ax = axes;
+%             showMatchedFeatures (I1*0.004,I2*0.004,matches1,matches2);
+%             fig_name = [res_dir,'unaligned_',num2str(i),'_',num2str(j),'.jpg'];
+%             saveas(fig0,fig_name);
+%             
+%             fig1 = figure;
+%             ax=axes;
+%             showMatchedFeatures (I1*0.001,I2*0.001,matches1,matches2,...
+%                 'montage','Parent',ax);
+%             fig_name = [res_dir,'matching_',num2str(i),'_',num2str(j),'.jpg'];
+%             saveas(fig1,fig_name);
+%             
+%             %Apply warping using the esimated affine transform
+%             Ir = imwarp(I1,tform,'OutputView',outputView);
+%             fig2 = figure;
+%             ax=axes;
+%             showMatchedFeatures(Ir*0.001,I2*0.001,[0,0],[0,0]);
+%             
+%             %Save the results
+%             fig_name = [res_dir,'align_',num2str(i),'_',num2str(j),'.jpg'];
+%             saveas(fig2,fig_name);
+%             imwrite(uint8(I1/25),[res_dir,'max_projection_',num2str(i),'.jpg']);
+%             imwrite(uint8(I2/25),[res_dir,'max_projection_',num2str(j),'.jpg']);
+%             fprintf('%d-%d\n',i,j);
+%             pause;
+%             close all;
+    end
+end
+
+el1 = toc(timer);
+%Store the ROI matches and distance dictionary
+roiDict = cell(lenId, lenId);
+roiDist = cell(lenId, lenId);
+
+
+%arrays for 
+precision_arr = [];
+recall_arr = [];
+accuracy_arr = [];
+ for i = 1:lenId
+        for j = i+1:lenId      
+           thresh = [0.1];
+           for k=1:length(thresh)
+                [roiDict(i,j),roiDist(i,j)] = findPairROI(tformArr(i,j),...
+                    Roi{i},Roi{j},midp_arr{i},midp_arr{j},thresh(k));
+%                 score = roiDict{i,j}(:,2)
+%                 [tp,fp,tn,fn,accuracy] = getStats(gt,score);
+%                 precision = tp/(tp+fp);
+%                 recall = tp/(tp+fn);
+%                 precision_arr(k)=precision;
+%                 recall_arr(k)=recall;
+%                 accuracy_arr(k)=accuracy;
+           end
+        end
+ end
+
+%  for i = 1:lenId
+%         for j = i+1:lenId 
+%             dict=roiDict{i,j};
+%             list1 = dict(:,1);
+%             list2 = dict(:,2);
+%             l1 = refDict(list1,idxDict{i});
+%             l2 = refDict(list2,idxDict{j});
+%             newDict = cat(2,list1,list2);
+%             roiDict{i,j}=newDict;
+%         end
+%  end
+% figure;
+% plot(recall_arr,precision_arr);
+% figure;
+% plot(thresh,accuracy_arr);
+roiMat = cell(lenId,lenId);
+for i = 1:lenId-1
+        for j = i+1:lenId 
+           idx = find(roiDict{i,j}(:,2));
+           roiMat{i,j}=sparse(roiDict{i,j}(idx,1), roiDict{i,j}(idx,2), ones(size(idx,1),1)); 
+           roiMat{j,i}=roiMat{i,j}';
+        end
+end
+for i = 1:lenId
+    roiMat{i,i}=sparse(eye(size(Roi{i},2)));
+end
+
+
+match ={};
+match_all = [];
+for i=1:lenId-1
+    match1 = zeros(size(roiMat{i,1},1),4);
+    match1(:,i) = 1:size(roiMat{i,1},1);
+    for j=i+1:lenId
+        if j~=i
+            [r,c] = find(roiMat{i,j});
+            match1(r,j) = c;
+            
+        end
+        
+    end
+    match{i,j} = match1;
+    match_all = vertcat(match_all,match1);
+end
+% score = roiDict{i,j}
+% [tp,fp,tn,fn,accuracy] = getStats(gt,score);
+% precision = tp/(tp+fp);
+% recall = tp/(tp+fn);
+match_all_u = unique(match_all,'rows');
+
+match_all_u(sum(match_all_u>0,2) == 1,:) = [];
+
+pptable = match_all_u;
+for i=1:size(match_all_u,2)
+    pptable = process_table(sortrows(pptable,i));
+end
+pptable = unique(sortrows(pptable,1),'rows');
+
+el2 = toc(timer);
+
+
+% pairMat = createPairMat(roiDict,Roi);
+% [r,w,a] = evaluateCyclic(pairMat{1,2}*pairMat{2,3}*pairMat{3,4},pairMat{1,4})
+
+
